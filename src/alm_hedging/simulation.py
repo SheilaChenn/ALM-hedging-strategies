@@ -82,14 +82,20 @@ def simulate_dynamic_hedge(
         for item in instruments
     }
     rows: list[dict[str, float]] = []
+    # Attribution uses every Greek the liability or instruments report, not
+    # only the hedged targets; otherwise gamma/vega/theta P&L on a delta-only
+    # hedge would be misreported as unexplained residual.
+    attribution_names = tuple(
+        dict.fromkeys((*risk_targets, "delta", "gamma", "vega", "rho", "theta"))
+    )
 
     def net_risks(
         market: MarketState, liability: Mapping[str, float]
     ) -> dict[str, float]:
-        result = {name: -float(liability.get(name, 0.0)) for name in risk_targets}
+        result = {name: -float(liability.get(name, 0.0)) for name in attribution_names}
         for item in instruments:
             item_risks = item.risks(market)
-            for name in risk_targets:
+            for name in attribution_names:
                 result[name] += positions[item.name] * float(item_risks.get(name, 0.0))
         return result
 
