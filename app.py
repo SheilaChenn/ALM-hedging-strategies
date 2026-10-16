@@ -436,6 +436,41 @@ def style_figure(fig: go.Figure, height: int = 350) -> go.Figure:
     return fig
 
 
+def md(text: str) -> str:
+    """Escape dollar signs so Streamlit markdown does not render them as LaTeX."""
+    return text.replace("$", "\\$")
+
+
+def case_figure(fig: go.Figure, height: int = 350) -> go.Figure:
+    """Dashboard styling with the legend kept clear of the chart title."""
+    fig = style_figure(fig, height)
+    fig.update_layout(
+        margin=dict(l=12, r=12, t=64, b=15),
+        legend=dict(orientation="h", y=1.14, x=0),
+        title=dict(y=0.97),
+    )
+    return fig
+
+
+@st.cache_resource(show_spinner=False)
+def load_case_study() -> tuple[Any | None, Any | None, str]:
+    """Load the committed October 2026 case-study results.
+
+    Returns ``(module, result, message)``; ``result`` is ``None`` when the
+    package or the committed JSON is unavailable so the tab can explain why.
+    The dashboard never recomputes the case study: it reads the same JSON the
+    PDF is built from, which is what keeps the two presentations reconciled.
+    """
+    try:
+        module = importlib.import_module("alm_hedging.case_study")
+    except ImportError as exc:
+        return None, None, f"alm_hedging.case_study is not importable ({exc})."
+    try:
+        return module, module.load_results(), ""
+    except FileNotFoundError as exc:
+        return module, None, str(exc)
+
+
 today = date.today()
 with st.sidebar:
     st.markdown("## ◈ ALM HedgeLab")
@@ -632,6 +667,7 @@ tabs = st.tabs(
         "Backtest",
         "Attribution",
         "Export",
+        "Oct 2026 case study",
     ]
 )
 
@@ -1073,6 +1109,518 @@ with tabs[6]:
         ),
         language="json",
     )
+
+with tabs[7]:
+    st.markdown("### October 2026 Market Shock Case Study")
+    cs_module, cs_result, cs_message = load_case_study()
+    if cs_result is None or cs_module is None:
+        st.warning(
+            "The case study results are not available in this environment. "
+            f"{cs_message} Generate them with `python scripts/build_case_study.py`."
+        )
+    else:
+        cs = cs_module
+        hm = cs.headline_metrics(cs_result)
+        rec = cs_result.strategies[cs_result.recommendation["key"]]
+        mkt = cs_result.market
+        net = cs_result.greeks["Net (insurer)"]
+        cs_cfg = cs_result.config
+        strategy_colors = {
+            "delta_only": COLORS["slate"],
+            "multi_greek": COLORS["gold"],
+            "stress_aware": COLORS["teal"],
+        }
+        short_labels = {k: v.split(" (")[0] for k, v in cs.STRATEGY_LABELS.items()}
+        st.markdown(md(f"**{cs_result.title}**"))
+        st.markdown(
+            f'<div class="section-note"><b>Illustrative only.</b> {cs_result.notice} '
+            "Every number on this tab is read from the committed results JSON that "
+            "also feeds the three-page PDF, so the two reconcile exactly "
+            "(regression-tested in <code>tests/test_case_study.py</code>).</div>",
+            unsafe_allow_html=True,
+        )
+
+        cards = st.columns(5)
+        with cards[0]:
+            metric_card(
+                "Unhedged shock P&L",
+                money(hm["surplus_shock_pnl"]),
+                "Surplus change, issue → stressed market (full revaluation)",
+            )
+        with cards[1]:
+            metric_card(
+                "Net delta",
+                f"{hm['net_delta']:+,.0f} $/pt",
+                "Insurer sign at the stressed market",
+            )
+        with cards[2]:
+            metric_card(
+                "Net vega",
+                f"{money(hm['net_vega'] / 100)} /vol pt",
+                "Long vega: liability credits fall when vol rises",
+            )
+        with cards[3]:
+            metric_card(
+                "Net DV01",
+                f"{hm['net_dv01']:+,.0f} $/bp",
+                "Liability duration exceeds the asset ladder",
+            )
+        with cards[4]:
+            metric_card(
+                "Recommended hedge",
+                f"{hm['recommended_variance_reduction']:.1%}",
+                f"OOS variance reduction · {short_labels[rec.key]}",
+            )
+
+        st.markdown("#### 1 · Documented backdrop vs. illustrative shock")
+        left, right = st.columns([1.35, 1])
+        with left:
+            st.caption(
+                "Documented market events (dated, sourced). These are facts about "
+                "October 2026 markets; they are not model inputs."
+            )
+            events = pd.DataFrame(
+                [
+                    {
+                        "Date": e["date"],
+                        "Event": e["summary"],
+                        "Outlet": e["source"],
+                        "Source": e["url"],
+                    }
+                    for e in cs_result.documented_events
+                ]
+            )
+            st.dataframe(
+                events,
+                width="stretch",
+                hide_index=True,
+                column_config={
+                    "Date": st.column_config.TextColumn(width="small"),
+                    "Event": st.column_config.TextColumn(width="large"),
+                    "Outlet": st.column_config.TextColumn(width="small"),
+                    "Source": st.column_config.LinkColumn(
+                        "Source", display_text="open", width="small"
+                    ),
+                },
+            )
+        with right:
+            st.caption(
+                "Illustrative shock applied to the synthetic block (assumption, "
+                "sized as an escalation of the documented moves)."
+            )
+            shock_rows = pd.DataFrame(
+                [
+                    {
+                        "Factor": "Equity index",
+                        "Issue (6 Oct)": f"{mkt['issue_index']:,.0f}",
+                        "Stressed (16 Oct)": f"{mkt['stressed_index']:,.0f}",
+                        "Shock": f"{mkt['equity_shock']:+.0%}",
+                    },
+                    {
+                        "Factor": "1y ATM implied vol",
+                        "Issue (6 Oct)": f"{mkt['atm_vol_1y_pre']:.0%}",
+                        "Stressed (16 Oct)": f"{mkt['atm_vol_1y_post']:.0%}",
+                        "Shock": f"{mkt['vol_shock'] * 100:+.0f} pts",
+                    },
+                    {
+                        "Factor": "10y zero rate",
+                        "Issue (6 Oct)": f"{mkt['zero_10y_pre']:.2%}",
+                        "Stressed (16 Oct)": f"{mkt['zero_10y_post']:.2%}",
+                        "Shock": f"{mkt['rate_shock_bp']:+.0f} bp (parallel)",
+                    },
+                ]
+            )
+            st.dataframe(shock_rows, width="stretch", hide_index=True)
+            curve = pd.DataFrame(
+                {
+                    "Tenor (years)": list(mkt["curve_tenors"]) * 2,
+                    "Zero rate": list(mkt["curve_pre"]) + list(mkt["curve_post"]),
+                    "State": ["Issue date"] * len(mkt["curve_tenors"])
+                    + ["Stressed"] * len(mkt["curve_tenors"]),
+                }
+            )
+            fig = px.line(
+                curve,
+                x="Tenor (years)",
+                y="Zero rate",
+                color="State",
+                markers=True,
+                log_x=True,
+                color_discrete_sequence=[COLORS["slate"], COLORS["blue"]],
+            )
+            fig.update_layout(
+                title="Synthetic zero curve (illustrative)",
+                yaxis_tickformat=".2%",
+                legend_title_text="",
+            )
+            st.plotly_chart(case_figure(fig, 260), width="stretch")
+
+        st.markdown("#### 2 · Synthetic $500M block and what the shock did")
+        port = pd.DataFrame(
+            [
+                {
+                    "Product": r["product"],
+                    "Policies": f"{r['policies']:,}",
+                    "Account value": money(r["account_value"]),
+                    "Term": f"{r['term_years']:.0f}y",
+                    "Crediting terms": r["description"],
+                    "PV at issue": money(r["pv_pre_shock"], short=False),
+                    "PV stressed": money(r["pv_post_shock"], short=False),
+                    "Shock ΔPV": money(r["shock_change"], short=False),
+                }
+                for r in cs_result.portfolio
+            ]
+        )
+        st.dataframe(
+            port,
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "Crediting terms": st.column_config.TextColumn(width="large"),
+            },
+        )
+        p1, p2 = st.columns([1, 1.3])
+        with p1:
+            legs = [
+                ("Liability equity leg", -cs_result.shock_pnl["liability_equity_leg"]),
+                ("Liability vol leg", -cs_result.shock_pnl["liability_vol_leg"]),
+                ("Liability rates leg", -cs_result.shock_pnl["liability_rate_leg"]),
+                ("Asset ladder (rates)", cs_result.shock_pnl["asset_change"]),
+                ("Surplus change", cs_result.shock_pnl["surplus_change"]),
+            ]
+            fig = go.Figure(
+                go.Bar(
+                    x=[name for name, _ in legs],
+                    y=[v for _, v in legs],
+                    marker_color=[
+                        COLORS["teal"] if v >= 0 else COLORS["red"] for _, v in legs
+                    ][:-1]
+                    + [COLORS["navy"]],
+                    text=[money(v) for _, v in legs],
+                    textposition="outside",
+                )
+            )
+            fig.update_layout(
+                title="Shock P&L decomposition (insurer sign, full revaluation)",
+                yaxis_title="$",
+                showlegend=False,
+                yaxis_range=[
+                    min(0.0, min(v for _, v in legs)) * 1.35,
+                    max(v for _, v in legs) * 1.45,
+                ],
+            )
+            fig.update_xaxes(tickangle=-20, tickfont=dict(size=11))
+            st.plotly_chart(case_figure(fig, 360), width="stretch")
+        with p2:
+            greek_rows = pd.DataFrame(
+                [
+                    {
+                        "Position": label,
+                        "PV": money(g["pv"], short=False),
+                        "Delta ($/pt)": f"{g['delta']:,.0f}",
+                        "Vega ($/vol pt)": money(g["vega"] / 100.0, short=False),
+                        "DV01 ($/bp)": f"{g['dv01']:,.0f}",
+                    }
+                    for label in (
+                        "RILA",
+                        "FIA",
+                        "IUL",
+                        "Liabilities",
+                        "Assets",
+                        "Net (insurer)",
+                    )
+                    for g in [cs_result.greeks[label]]
+                ]
+            )
+            st.caption(
+                "Bump-and-revalue exposures at the stressed market (engine sign: "
+                "positive = value rises). The Net row is what the hedge must offset."
+            )
+            st.dataframe(greek_rows, width="stretch", hide_index=True)
+            st.caption(
+                md(
+                    f"Forward-looking scenario set: {cs_result.scenarios['description']} "
+                    f"Unhedged out-of-sample P&L sd {money(hm['unhedged_oos_sd'])}, "
+                    f"ES95 {money(hm['unhedged_oos_es95'])}."
+                )
+            )
+
+        st.markdown("#### 3 · Three hedging strategies, one optimizer")
+        comp = cs.comparison_table(cs_result)
+        trades = cs.trade_table(cs_result)
+        st.caption(
+            md(
+                "All three hedges are solved by the engine's constrained optimizer from "
+                "the same instrument universe, premium budget "
+                f"({money(cs_cfg['premium_budget_pct'] * hm['account_value'])}), "
+                f"liquidity budget ({money(cs_cfg['liquidity_budget'])}) and "
+                "position caps; they differ only in the objective. Effectiveness is "
+                "measured by full revaluation on "
+                f"{cs_result.scenarios['out_of_sample_count']} out-of-sample joint "
+                "shocks, as the validation report recommends."
+            )
+        )
+        comp_display = pd.DataFrame(
+            {
+                "Strategy": comp["Strategy"],
+                "Recommended": comp["Recommended"],
+                "Premium paid": comp["Premium paid"].map(
+                    lambda v: money(v, short=False)
+                ),
+                "Transaction cost": comp["Transaction cost"].map(
+                    lambda v: money(v, short=False)
+                ),
+                "Liquidity used": comp["Liquidity used"].map(money),
+                "Greek-metric effectiveness": comp["Greek-metric effectiveness"].map(
+                    lambda v: f"{v:.1%}"
+                ),
+                "OOS variance reduction": comp["OOS variance reduction"],
+                "Dollar-offset slope": comp["Dollar-offset slope"].map(
+                    lambda v: f"{v:.2f}"
+                ),
+                "ES95 reduction": comp["ES95 reduction"].map(lambda v: f"{v:.1%}"),
+                "Hedged P&L sd": comp["Hedged P&L sd"].map(money),
+                "Residual delta ($/pt)": comp["Residual delta"].map(
+                    lambda v: f"{v:+,.0f}"
+                ),
+                "Residual vega ($/vol pt)": (comp["Residual vega"] / 100).map(
+                    lambda v: f"{v:+,.0f}"
+                ),
+                "Residual DV01 ($/bp)": comp["Residual DV01"].map(
+                    lambda v: f"{v:+,.0f}"
+                ),
+            }
+        )
+        st.dataframe(
+            comp_display,
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "OOS variance reduction": st.column_config.ProgressColumn(
+                    format="percent", min_value=0, max_value=1
+                ),
+                "Recommended": st.column_config.CheckboxColumn(),
+            },
+        )
+        t1, t2 = st.columns([1, 1.2])
+        with t1:
+            st.caption("Trades (contracts; positive = long)")
+            trades_display = trades.rename(
+                columns={v: short_labels[k] for k, v in cs.STRATEGY_LABELS.items()}
+            )
+            for col in short_labels.values():
+                trades_display[col] = trades_display[col].map(lambda v: f"{v:+,.0f}")
+            st.dataframe(trades_display, width="stretch", hide_index=True)
+            st.caption(
+                md(
+                    f"Recommended: {short_labels[rec.key]} — premium "
+                    f"{money(rec.premium_used)}, transaction cost "
+                    f"{money(rec.transaction_cost)}, liquidity {money(rec.liquidity_used)} "
+                    f"of {money(cs_cfg['liquidity_budget'])}."
+                )
+            )
+        with t2:
+            fig = go.Figure()
+            unhedged = np.asarray(cs_result.oos_unhedged_pnl) / 1e6
+            fig.add_trace(
+                go.Histogram(
+                    x=unhedged,
+                    name="Unhedged",
+                    marker_color="#CBD5E1",
+                    opacity=0.85,
+                    xbins=dict(size=1.0),
+                )
+            )
+            for key in cs.STRATEGY_ORDER:
+                s = cs_result.strategies[key]
+                fig.add_trace(
+                    go.Histogram(
+                        x=np.asarray(s.oos_hedged_pnl) / 1e6,
+                        name=short_labels[key],
+                        marker_color=strategy_colors[key],
+                        opacity=0.55,
+                        xbins=dict(size=1.0),
+                    )
+                )
+            fig.update_layout(
+                barmode="overlay",
+                title="Out-of-sample surplus P&L ($M, insurer sign)",
+                xaxis_title="P&L ($M)",
+            )
+            st.plotly_chart(case_figure(fig, 360), width="stretch")
+
+        s1, s2 = st.columns(2)
+        with s1:
+            stress = cs.stress_table(cs_result)
+            stress_names = [n.split(" (")[0] for n in stress["Scenario"]]
+            fig = go.Figure()
+            fig.add_trace(
+                go.Bar(
+                    x=stress_names,
+                    y=stress["Unhedged"],
+                    name="Unhedged",
+                    marker_color="#CBD5E1",
+                )
+            )
+            for key in cs.STRATEGY_ORDER:
+                fig.add_trace(
+                    go.Bar(
+                        x=stress_names,
+                        y=stress[cs.STRATEGY_LABELS[key]],
+                        name=short_labels[key],
+                        marker_color=strategy_colors[key],
+                    )
+                )
+            fig.update_layout(
+                barmode="group",
+                title="Named full-revaluation stresses: surplus P&L ($)",
+                yaxis_title="$",
+            )
+            fig.update_xaxes(tickangle=-30, tickfont=dict(size=10))
+            st.plotly_chart(case_figure(fig, 400), width="stretch")
+            with st.expander("Stress definitions and P&L table"):
+                stress_display = stress.copy()
+                for col in stress_display.columns[1:]:
+                    stress_display[col] = stress_display[col].map(money)
+                st.dataframe(
+                    stress_display.rename(
+                        columns={
+                            v: short_labels[k] for k, v in cs.STRATEGY_LABELS.items()
+                        }
+                    ),
+                    width="stretch",
+                    hide_index=True,
+                )
+        with s2:
+            rob = cs.robustness_table(cs_result)
+            base_row: dict[str, Any] = {"Shock distribution": "Base out-of-sample set"}
+            for key in cs.STRATEGY_ORDER:
+                base_row[cs.STRATEGY_LABELS[key]] = cs_result.strategies[
+                    key
+                ].out_of_sample["variance_reduction"]
+            rob = pd.concat([pd.DataFrame([base_row]), rob], ignore_index=True)
+            rob = rob.rename(
+                columns={v: short_labels[k] for k, v in cs.STRATEGY_LABELS.items()}
+            )
+            for col in short_labels.values():
+                rob[col] = rob[col].map(lambda v: f"{v:.1%}")
+            st.caption(
+                "Robustness: positions held fixed, out-of-sample variance reduction "
+                "re-measured under alternative shock distributions."
+            )
+            st.dataframe(rob, width="stretch", hide_index=True)
+            st.dataframe(
+                pd.DataFrame(
+                    [
+                        {
+                            "Shock distribution": e["name"],
+                            "Description": e["description"],
+                        }
+                        for e in cs_result.robustness
+                    ]
+                ),
+                width="stretch",
+                hide_index=True,
+                column_config={
+                    "Shock distribution": st.column_config.TextColumn(width="small"),
+                    "Description": st.column_config.TextColumn(width="large"),
+                },
+            )
+
+        st.markdown(md(f"#### 4 · Recommended strategy: {rec.label}"))
+        trade_lines = [
+            f"{rec.trades[i['key']]:+,.0f} × {i['name']} "
+            f"(notional {money(rec.notional[i['key']])})"
+            for i in cs_result.instruments
+            if abs(rec.trades[i["key"]]) >= 0.5
+        ]
+        r1, r2 = st.columns([1, 1])
+        with r1:
+            st.markdown("**Trades**")
+            for line in trade_lines:
+                st.markdown(md(f"- {line}"))
+            st.markdown(
+                md(
+                    f"- Option premium {money(rec.premium_used)}; transaction cost "
+                    f"{money(rec.transaction_cost)}; liquidity used "
+                    f"{money(rec.liquidity_used)} of {money(cs_cfg['liquidity_budget'])}"
+                )
+            )
+            st.markdown("**Effectiveness (out-of-sample, full revaluation)**")
+            st.markdown(
+                md(
+                    f"- Variance reduction {rec.out_of_sample['variance_reduction']:.1%}; "
+                    f"dollar-offset slope {rec.out_of_sample['dollar_offset_slope']:.2f}\n"
+                    f"- P&L sd {money(hm['unhedged_oos_sd'])} → "
+                    f"{money(rec.out_of_sample['hedged_sd'])}; ES95 "
+                    f"{money(hm['unhedged_oos_es95'])} → "
+                    f"{money(rec.out_of_sample['es95_hedged'])} "
+                    f"({rec.out_of_sample['es95_reduction']:.1%} reduction)\n"
+                    f"- Residual exposures: delta {rec.residual_greeks['delta']:+,.0f} $/pt, "
+                    f"vega {money(rec.residual_greeks['vega'] / 100)}/pt, DV01 "
+                    f"{rec.residual_greeks['dv01']:+,.0f} $/bp "
+                    f"(unhedged {net['delta']:+,.0f} / {money(net['vega'] / 100)} / "
+                    f"{net['dv01']:+,.0f})"
+                )
+            )
+        with r2:
+            st.markdown("**Why this one (decision rule applied to model outputs)**")
+            for line in cs_result.recommendation["rationale"]:
+                st.markdown(md(f"- {line}"))
+            st.markdown("**Ranking**")
+            ranking = pd.DataFrame(cs_result.recommendation["ranking"])
+            st.dataframe(
+                pd.DataFrame(
+                    {
+                        "Strategy": ranking["key"].map(short_labels),
+                        "OOS variance reduction": ranking["variance_reduction"].map(
+                            lambda v: f"{v:.1%}"
+                        ),
+                        "Premium + cost": ranking["total_cost"].map(
+                            lambda v: money(v, short=False)
+                        ),
+                        "ES95 reduction": ranking["es95_reduction"].map(
+                            lambda v: f"{v:.1%}"
+                        ),
+                    }
+                ),
+                width="stretch",
+                hide_index=True,
+            )
+
+        with st.expander("Key assumptions (illustrative)"):
+            for line in cs_result.illustrative_assumptions:
+                st.markdown(md(f"- {line}"))
+        with st.expander("Limitations and what would change the answer"):
+            for line in cs_result.limitations:
+                st.markdown(md(f"- {line}"))
+        with st.expander("Sources for the documented backdrop"):
+            for e in cs_result.documented_events:
+                st.markdown(md(f"- {e['date']} — {e['source']}: {e['url']}"))
+        pdf_path = cs.DEFAULT_RESULTS_DIR / cs.PDF_FILENAME
+        d1, d2 = st.columns(2)
+        with d1:
+            if pdf_path.exists():
+                st.download_button(
+                    "Download the three-page case study PDF",
+                    pdf_path.read_bytes(),
+                    pdf_path.name,
+                    "application/pdf",
+                )
+            else:
+                st.button("PDF not built yet", disabled=True, width="stretch")
+        with d2:
+            st.download_button(
+                "Download the results JSON (single source for PDF and dashboard)",
+                json.dumps(cs_result.to_dict(), indent=1, sort_keys=True),
+                cs.RESULTS_FILENAME,
+                "application/json",
+            )
+        st.caption(
+            f"Results as of {cs_result.as_of} · engine v{cs_result.engine_version} · "
+            f"run_case_study() runtime {cs_result.runtime_seconds:.0f}s · rebuild with "
+            "`python scripts/build_case_study.py`."
+        )
 
 st.markdown(
     """
