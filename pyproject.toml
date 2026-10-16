@@ -1,0 +1,72 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "alm-hedging"
+version = "0.1.0"
+description = "Reproducible ALM hedging research framework for synthetic indexed insurance liabilities"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+authors = [{ name = "ALM Hedging Research" }]
+dependencies = [
+  "numpy>=2.1",
+  "pandas>=2.2",
+  "scipy>=1.14",
+  "streamlit>=1.39",
+  "plotly>=5.24",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3",
+  "pytest-cov>=5.0",
+  "ruff>=0.7",
+  "mypy>=1.13",
+  "nbformat>=5.10",
+  "pandas-stubs>=3.0",
+  "scipy-stubs>=1.18",
+  "nbconvert>=7.16",
+  "ipykernel>=6.29",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers --strict-config"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["alm_hedging"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+extend-exclude = ["notebooks"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501", "B008"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+packages = ["alm_hedging"]
+warn_unreachable = true
+exclude = ["notebooks"]
+disable_error_code = [
+  "arg-type",
+  "assignment",
+  "call-overload",
+  "no-any-return",
+  "return-value",
+  "type-var",
+  "union-attr",
+]

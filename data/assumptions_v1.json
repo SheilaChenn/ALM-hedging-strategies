@@ -1,0 +1,53 @@
+{
+  "model_version": "v1.0",
+  "as_of_date": "2025-01-02",
+  "currency": "USD",
+  "index": {
+    "name": "SYNTH500",
+    "spot": 100.0,
+    "continuous_dividend_yield": 0.015
+  },
+  "projection": {
+    "day_count": "ACT/365",
+    "monte_carlo_paths": 50000,
+    "seed": 20250102,
+    "antithetic": true
+  },
+  "policyholder": {
+    "annual_lapse_rate": {
+      "RILA": 0.055,
+      "FIA": 0.045,
+      "IUL": 0.035
+    },
+    "annual_mortality_rate": {
+      "RILA": 0.004,
+      "FIA": 0.008,
+      "IUL": 0.003
+    },
+    "iul_annual_premium_growth": 0.0,
+    "iul_cost_of_insurance_rate": 0.004
+  },
+  "risk": {
+    "spot_bump_relative": 0.01,
+    "vol_bump_absolute": 0.01,
+    "rate_bump_bp": 1.0,
+    "theta_days": 1,
+    "scenarios": {
+      "equity_down_20": {"spot_relative": -0.20},
+      "vol_up_10pt": {"vol_absolute": 0.10},
+      "rates_up_100bp": {"rate_bp": 100.0},
+      "combined_crash": {
+        "spot_relative": -0.30,
+        "vol_absolute": 0.15,
+        "rate_bp": -75.0
+      }
+    }
+  },
+  "hedging": {
+    "rebalance_days": 5,
+    "option_budget_fraction": 0.03,
+    "max_turnover_fraction": 0.25,
+    "transaction_cost_bp": 2.0
+  },
+  "notice": "Synthetic research assumptions; not production data or investment advice."
+}

@@ -1,0 +1,4 @@
+model_version,cohort_id,product,index,policy_count,issue_age,term_years,premium_per_policy,account_value_per_policy,participation_rate,cap_rate,floor_rate,buffer_rate,annual_charge_rate
+v1.0,RILA-2025-A,RILA,SYNTH500,2500,57,6,100000,100000,1.00,0.180,-0.100,0.100,0.0100
+v1.0,FIA-2025-A,FIA,SYNTH500,4000,62,10,75000,75000,0.85,0.095,0.000,0.000,0.0075
+v1.0,IUL-2025-A,IUL,SYNTH500,1800,45,20,12000,85000,1.00,0.110,0.000,0.000,0.0125
