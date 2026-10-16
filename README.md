@@ -62,13 +62,49 @@ python validation/run_validation.py            # ~1 minute, full Monte Carlo siz
 python validation/run_validation.py --quick    # smaller sample sizes
 ```
 
+## October 2026 market shock case study
+
+*Hedging Index-Linked Insurance Liabilities Amid Equity Selloffs and Treasury
+Yield Volatility* applies the validated engine to a synthetic $500M RILA/FIA/IUL
+block struck just before the October 2026 AI-related equity selloff and the
+Treasury yield swings around it. Documented market events are dated and
+sourced; the shock sizes, the portfolio, the hedge instruments, and every
+model-generated hedge are illustrative and are not Pacific Life positions or
+trading decisions.
+
+- `src/alm_hedging/case_study.py` is the single reproducible source of every
+  number: market states, cohorts, Greeks, full-revaluation scenario sets, the
+  three hedge strategies (delta-only, multi-Greek, stress-aware constrained),
+  the out-of-sample effectiveness metrics, the robustness sets, and the
+  decision rule.
+- `docs/case_study/october-2026-market-shock-results.json` is the committed
+  output of `run_case_study()`; the PDF and the dashboard both read it.
+- `docs/case_study/october-2026-market-shock-case-study.pdf` is the three-page
+  brief (market shock and exposures; hedging alternatives and recommendation;
+  assumptions, workflow, validation evidence, limitations).
+- The dashboard's **Oct 2026 case study** tab presents the same results
+  interactively and offers the PDF and JSON for download.
+- `tests/test_case_study.py` re-runs the module and checks that the committed
+  JSON reconciles, recomputes the effectiveness metrics with
+  `validation/reference.py`, and rebuilds the hedged stress P&L from the trades.
+
+Rebuild the results and the PDF (about one minute; `matplotlib` is in the dev
+extras):
+
+```bash
+python scripts/build_case_study.py            # recompute JSON, then render the PDF
+python scripts/build_case_study.py --reuse    # re-render the PDF from the committed JSON
+```
+
 ## Repository guide
 
 - `src/alm_hedging/`: market data, contracts, pricing, risk, scenarios, and
-  hedge simulation.
+  hedge simulation; `case_study.py` orchestrates the October 2026 case study.
+- `scripts/`: `build_case_study.py` renders the case-study JSON and PDF.
 - `data/`: synthetic curve, volatility surface, representative cohorts, and
   model assumptions, all tagged with model version and as-of date.
-- `docs/`: assumptions, methodology, validation standards, and exclusions.
+- `docs/`: assumptions, methodology, validation standards, exclusions, and the
+  `case_study/` results JSON and PDF.
 - `notebooks/`: executable research narrative using only the public package API.
 - `tests/`: quantitative identities, numerical stability, replay, and smoke
   tests, plus regression tests pinned to the validation benchmarks.
