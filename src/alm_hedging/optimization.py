@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 from scipy.optimize import minimize
@@ -187,7 +187,7 @@ def optimize_hedge(
         tail_count = max(1, int(np.ceil((1.0 - cvar_alpha) * net_losses.size)))
         return float(np.mean(np.sort(net_losses)[-tail_count:]))
 
-    scipy_constraints = []
+    scipy_constraints: list[dict[str, Any]] = []
     if np.isfinite(constraints.premium_budget):
         scipy_constraints.append(
             {
@@ -205,20 +205,34 @@ def optimize_hedge(
     if constraints.max_concentration < 1.0:
         scipy_constraints.append({"type": "ineq", "fun": concentration_slack})
 
-    x0 = np.array([np.clip(current[i], *bounds[i]) for i in range(len(instruments))])
-    result = minimize(
-        objective,
-        x0,
-        method="SLSQP",
-        bounds=bounds,
-        constraints=scipy_constraints,
-        options={"ftol": 1e-12, "maxiter": 2_000, "disp": False},
-    )
+    def clip_to_bounds(q: np.ndarray) -> np.ndarray:
+        return np.array([np.clip(q[i], *bounds[i]) for i in range(len(instruments))])
 
-    rounded = np.round(np.asarray(result.x) / lots) * lots
-    rounded = np.array(
-        [np.clip(rounded[i], bounds[i][0], bounds[i][1]) for i in range(len(rounded))]
+    # Multi-start: the current book and the unconstrained weighted least-squares
+    # hedge. The |q| terms are non-smooth at zero, so a start at the origin can
+    # stall SLSQP on a kink.
+    least_squares, *_ = np.linalg.lstsq(
+        matrix * weights[:, None], -target * weights, rcond=None
     )
+    starts = [clip_to_bounds(current), clip_to_bounds(least_squares)]
+    result = None
+    for x0 in starts:
+        candidate = minimize(
+            objective,
+            x0,
+            method="SLSQP",
+            bounds=bounds,
+            constraints=scipy_constraints,
+            options={"ftol": 1e-12, "maxiter": 2_000, "disp": False},
+        )
+        if result is None or (
+            candidate.fun < result.fun
+            and all(c["fun"](candidate.x) >= -1e-8 for c in scipy_constraints)
+        ):
+            result = candidate
+    assert result is not None
+
+    rounded = clip_to_bounds(np.round(np.asarray(result.x) / lots) * lots)
 
     def slacks(q: np.ndarray) -> dict[str, float]:
         values = {
@@ -236,8 +250,14 @@ def optimize_hedge(
     def feasible(q: np.ndarray, tolerance: float = 1e-8) -> bool:
         return bool(min(slacks(q).values(), default=0.0) >= -tolerance)
 
-    # Rounding can cross a budget. Move each trade one lot toward current until
-    # feasible, then use a deterministic local search to recover hedge quality.
+    def min_slack(q: np.ndarray) -> float:
+        return float(min(slacks(q).values(), default=0.0))
+
+    # Rounding can cross a budget. Repair by unwinding one lot of whichever
+    # trade most improves the violated constraint (ties broken by objective),
+    # then use a deterministic local search to recover hedge quality. Choosing
+    # the largest-notional trade instead (the previous rule) could unwind an
+    # instrument that does not consume the violated budget at all.
     for _ in range(10_000):
         if feasible(rounded):
             break
@@ -245,24 +265,41 @@ def optimize_hedge(
         candidates = np.flatnonzero(np.abs(trade) > 1e-12)
         if candidates.size == 0:
             break
-        i = int(candidates[np.argmax(np.abs(trade[candidates]) * prices[candidates])])
-        rounded[i] -= np.sign(trade[i]) * lots[i]
-        rounded[i] = np.clip(rounded[i], *bounds[i])
+        best_move: tuple[float, float, int] | None = None
+        for i in candidates:
+            moved = rounded.copy()
+            moved[i] = np.clip(moved[i] - np.sign(trade[i]) * lots[i], *bounds[i])
+            key = (-min_slack(moved), objective(moved), int(i))
+            if best_move is None or key < best_move:
+                best_move = key
+        assert best_move is not None
+        i = best_move[2]
+        rounded[i] = np.clip(rounded[i] - np.sign(trade[i]) * lots[i], *bounds[i])
 
+    n = len(instruments)
+    moves: list[tuple[tuple[int, float], ...]] = [
+        ((i, direction),) for i in range(n) for direction in (-1.0, 1.0)
+    ]
+    # Pair moves let the search trade one lot of an instrument for another
+    # when a budget is binding and no single-lot move is feasible.
+    moves += [
+        ((i, di), (j, dj))
+        for i in range(n)
+        for j in range(i + 1, n)
+        for di in (-1.0, 1.0)
+        for dj in (-1.0, 1.0)
+    ]
     best = rounded
     best_objective = objective(best)
-    for _ in range(10):
+    for _ in range(200):
         improved = False
-        for i in range(len(instruments)):
-            for direction in (-1.0, 1.0):
-                candidate = best.copy()
+        for move in moves:
+            candidate = best.copy()
+            for i, direction in move:
                 candidate[i] = np.clip(candidate[i] + direction * lots[i], *bounds[i])
-                if (
-                    feasible(candidate)
-                    and objective(candidate) + 1e-14 < best_objective
-                ):
-                    best, best_objective = candidate, objective(candidate)
-                    improved = True
+            if feasible(candidate) and objective(candidate) + 1e-14 < best_objective:
+                best, best_objective = candidate, objective(candidate)
+                improved = True
         if not improved:
             break
 
