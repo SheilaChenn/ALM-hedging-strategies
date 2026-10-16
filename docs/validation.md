@@ -38,6 +38,21 @@ for production. Before any production use, an independent team should validate
 contract interpretation, source data, calibration, numerical implementation,
 hedging constraints, behavior assumptions, and end-user controls.
 
+## Independent model validation
+
+An independent quantitative validation of pricing, Greeks, and hedging is
+documented in [`MODEL_VALIDATION_REPORT.md`](../MODEL_VALIDATION_REPORT.md).
+Its benchmarks live in `validation/reference.py` (closed forms, lognormal
+quadrature, deterministic recursions, brute-force search, and an independent
+Monte Carlo stream that import nothing from the engine's pricing code) and are
+executed by:
+
+```bash
+python validation/run_validation.py           # full benchmark tables
+python validation/run_validation.py --quick   # smaller Monte Carlo sizes
+pytest tests/test_validation_benchmarks.py    # regression subset
+```
+
 ## Reproducible review
 
 Install the locked project environment, run `pytest`, execute the notebook from

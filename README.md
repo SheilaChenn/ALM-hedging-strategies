@@ -50,6 +50,18 @@ ruff format --check .
 mypy src
 ```
 
+## Model validation
+
+[`MODEL_VALIDATION_REPORT.md`](MODEL_VALIDATION_REPORT.md) documents an
+independent validation of the pricing, Greeks, and hedging engine, the
+material corrections it produced, and the modeling limitations that remain.
+Reproduce the benchmark tables with:
+
+```bash
+python validation/run_validation.py            # ~1 minute, full Monte Carlo sizes
+python validation/run_validation.py --quick    # smaller sample sizes
+```
+
 ## Repository guide
 
 - `src/alm_hedging/`: market data, contracts, pricing, risk, scenarios, and
@@ -59,7 +71,9 @@ mypy src
 - `docs/`: assumptions, methodology, validation standards, and exclusions.
 - `notebooks/`: executable research narrative using only the public package API.
 - `tests/`: quantitative identities, numerical stability, replay, and smoke
-  tests.
+  tests, plus regression tests pinned to the validation benchmarks.
+- `validation/`: independent reference implementations and the benchmark
+  runner behind the model validation report.
 
 Start with [model methodology](docs/model-methodology.md) and
 [assumptions](docs/assumptions.md). Limitations and intended use are explicit in
