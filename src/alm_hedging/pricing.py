@@ -206,27 +206,38 @@ def simulate_gbm_paths(
     *,
     antithetic: bool = True,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Simulate deterministic-seed GBM paths using term-interpolated parameters."""
+    """Simulate deterministic-seed GBM paths consistent with the market term structure.
+
+    Each step uses the forward rate, forward dividend yield, and forward
+    variance implied by the zero curves and the at-the-money volatility term
+    structure, so that ``E[S_T]`` equals the market forward and the terminal
+    log-variance equals ``sigma_atm(T)^2 T`` for every grid maturity.  Using
+    spot zero rates and spot implied volatilities as instantaneous parameters
+    (the previous convention) biased Monte Carlo values against the analytic
+    benchmark whenever the curves were not flat.
+    """
     if horizon <= 0.0 or n_paths <= 0 or steps_per_year <= 0:
         raise ValueError("horizon, n_paths, and steps_per_year must be positive")
     n_steps = max(1, int(np.ceil(horizon * steps_per_year)))
     times = np.linspace(0.0, horizon, n_steps + 1)
-    dt = np.diff(times)
     rng = np.random.default_rng(seed)
     n_base = (n_paths + 1) // 2 if antithetic else n_paths
     z = rng.standard_normal((n_base, n_steps))
     if antithetic:
         z = np.vstack((z, -z))[:n_paths]
+    grid = np.maximum(times, 1e-12)
+    rate_integral = np.asarray(market.rate_curve.zero_rate(grid)) * grid
+    dividend_integral = np.asarray(market.dividend_curve.zero_rate(grid)) * grid
+    atm_vol = np.asarray(market.vol_surface.volatility(grid, 0.0))
+    total_variance = atm_vol**2 * grid
+    # A non-increasing total variance is a calendar arbitrage in the input
+    # surface; the step is then floored at a tiny positive variance.
+    step_variance = np.maximum(np.diff(total_variance), 1e-16)
+    drift = np.diff(rate_integral) - np.diff(dividend_integral) - 0.5 * step_variance
+    log_increments = drift[None, :] + np.sqrt(step_variance)[None, :] * z
     paths = np.empty((n_paths, n_steps + 1), dtype=float)
     paths[:, 0] = market.spot
-    for i, step in enumerate(dt):
-        mid = 0.5 * (times[i] + times[i + 1])
-        rate = float(market.rate_curve.zero_rate(max(mid, 1e-12)))
-        dividend = float(market.dividend_curve.zero_rate(max(mid, 1e-12)))
-        vol = float(market.vol_surface.volatility(max(mid, 1e-12), 0.0))
-        paths[:, i + 1] = paths[:, i] * np.exp(
-            (rate - dividend - 0.5 * vol**2) * step + vol * np.sqrt(step) * z[:, i]
-        )
+    paths[:, 1:] = market.spot * np.exp(np.cumsum(log_increments, axis=1))
     return times, paths
 
 
