@@ -96,8 +96,31 @@ python scripts/build_case_study.py            # recompute JSON, then render the 
 python scripts/build_case_study.py --reuse    # re-render the PDF from the committed JSON
 ```
 
+## Simple model
+
+`simple/` is a self-contained, illustrative version of the framework for
+readers who want the core idea without the full machinery: one year, one
+index, $100 of account value per product, closed-form Black-Scholes with flat
+synthetic inputs, and no imports from `src/alm_hedging`.
+
+- `simple/simple_model.py`: Black-Scholes legs with analytic Greeks; RILA,
+  FIA, and IUL as lists of vanilla options; cap solver; full-revaluation stress
+  table; futures delta hedge; `run_simple_model()` returns everything.
+- `simple/simple_model.ipynb`: six short sections (assumptions, payoffs,
+  pricing, Greeks, cap vs budget, hedge and stress) with saved outputs.
+- `simple/build_report.py` renders `simple/simple-model-report.pdf`, a
+  one-page summary built from the same `run_simple_model()` output.
+- `tests/test_simple_model.py` covers put-call parity, RILA payoff edge cases,
+  finite-difference Greeks, the cap solver, and the hedge.
+
+```bash
+jupyter nbconvert --to notebook --execute --inplace simple/simple_model.ipynb
+python simple/build_report.py
+```
+
 ## Repository guide
 
+- `simple/`: the illustrative one-file model, its notebook, and its PDF.
 - `src/alm_hedging/`: market data, contracts, pricing, risk, scenarios, and
   hedge simulation; `case_study.py` orchestrates the October 2026 case study.
 - `scripts/`: `build_case_study.py` renders the case-study JSON and PDF.
